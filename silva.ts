@@ -119,14 +119,20 @@ const createAgent = (props: AgentProps, callbackFn: (event: Message) => void) =>
             const completion: CompletionResponse = await response.json();
             // console.log(completion);
 
+            if (!completion.choices) {
+                console.log('no choices!')
+                console.log(completion);
+            }
+
             if (completion.choices.length > 1) {
                 console.log('more than one choice') // TODO: logging and handle multiple choices
+                console.log(completion);
             }
 
             const choice0 = completion.choices[0];
             messages.push(choice0.message);
             callbackFn(choice0.message)
-            console.log(choice0)
+            // console.log(choice0)
 
             if (choice0.message.tool_calls?.length) {
                 for (const call of choice0.message.tool_calls) {
@@ -195,7 +201,13 @@ const agent = createAgent({
     ],
 }, (e) => {
     try {
-        console.log(e.role, e.content)
+        if (e.tool_calls?.length) {
+            console.log('🔨', e.tool_calls[0].function.name);
+        } else if (e.role === 'tool') {
+            // no-op
+        } else {
+            console.log(e.role, e.content)
+        }
     } catch {
         console.log(e);
     }
@@ -207,20 +219,6 @@ setTimeout(() => {
     agent.send({role: 'user', content: 'try the fetch tool with https://caos.one/posts'});
 }, 6000)
 
-// const modelsResponse = await fetch('http://10.11.116.184:8001/v1/models');
-// const models = await modelsResponse.json();
-// console.log(models);
-
-// const completionRequest: CompletionRequest = {
-//     model: 'Qwen3.8-27B-Q4_K_M.gguf',
-//     messages: [
-//         { role: 'user', content: 'Hello!' }
-//     ]
-// }
-// const completionResponse = await fetch('http://10.11.116.184:8001/v1/chat/completions', {
-//     method: 'POST',
-//     body: JSON.stringify(completionRequest),
-//     headers: {'content-type': 'application/json'},
-// });
-// const completion = await completionResponse.json();
-// console.log(completion);
+setInterval(() => {
+    agent.send({role: 'user', content: 'keep digging'})
+}, 30000)
