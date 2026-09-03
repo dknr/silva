@@ -1,7 +1,16 @@
+type ToolCall = {
+    type: string; // expect 'function'
+    function: {
+        name: string;
+        arguments: unknown;
+    }
+    id: string;
+}
 type Message = {
     role: string;
     content: string;
     reasoning_content?: string;
+    tool_calls?: ToolCall[];
 }
 type Tool = {
     type: 'function';
@@ -10,6 +19,10 @@ type Tool = {
         parameters: Map<string, unknown>;
     }
 }
+
+type ToolImpl = (params: unknown) => string;
+type Tools = Map<string, ToolImpl>;
+
 type CompletionRequest = {
     model: string;
     messages: Array<Message>;
@@ -62,8 +75,22 @@ type AgentEvent = {
     message: Message;
 }
 
+// TODO: not as a global
+// IDEA: hot-reload tools - send new tool fns in on the fly
+const tools: Map<string, ToolImpl> = {
+    time: () => new Date().toISOString(),
+}
+
+const createCompletionFetch = async (baseUrl: string, request: CompletionRequest): Promise<CompletionResponse> => {
+    return await fetch(new URL('v1/chat/completions', baseUrl), {
+        method: 'POST',
+        body: JSON.stringify(request),
+        headers: {'content-type': 'application/json'}
+    });
+}
+
 const createAgent = (props: AgentProps, callbackFn: (event: AgentEvent) => void) => {
-    const inputQueue = createAsyncQueue();
+    const inputQueue = createAsyncQueue<Message>();
     const messages: Array<Message> = [];
 
     void (async () => {
@@ -77,14 +104,12 @@ const createAgent = (props: AgentProps, callbackFn: (event: AgentEvent) => void)
             const request: CompletionRequest = {
                 model: props.model,
                 messages,
+                tools: props.tools,
             }
-            const response = await fetch(new URL('v1/chat/completions', props.baseUrl), {
-                method: 'POST',
-                body: JSON.stringify(request),
-                headers: {'content-type': 'application/json'}
-            });
+            const response = await createCompletionFetch(props.baseUrl, request);
 
             const completion: CompletionResponse = await response.json();
+            console.log(completion);
 
             if (completion.choices.length > 1) {
                 console.log('more than one choice') // TODO: logging and handle multiple choices
@@ -93,6 +118,23 @@ const createAgent = (props: AgentProps, callbackFn: (event: AgentEvent) => void)
             const choice0 = completion.choices[0];
             messages.push(choice0.message);
             callbackFn(choice0.message)
+
+            if (choice0.message.tool_calls?.length) {
+                for (const call of choice0.message.tool_calls) {
+                    console.log(call);
+                    if (call.type !== 'function') continue;
+                    // TODO: error prone variable names - see global `tools`
+                    const tool = tools[call.function.name];
+                    if (!tool) {
+                        console.log(`tool not found: ${call.function.name}`);
+                        // TODO: tell the agent the tool was not found
+                        continue;
+                    }
+                    const result = tool();
+                    console.log(call.function.name, result);
+                    inputQueue.push(result);
+                }
+            }
         }
     })();
 
@@ -105,7 +147,12 @@ const createAgent = (props: AgentProps, callbackFn: (event: AgentEvent) => void)
 
 const agent = createAgent({
     baseUrl: 'http://10.11.116.184:8001',
-    tools: [],
+    tools: [
+        {type: 'function', function: {
+            name: 'time',
+            parameters: {}
+        }}
+    ],
 }, console.log);
 
 agent.send('hello!')
