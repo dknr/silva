@@ -1,10 +1,11 @@
+import z from "zod";
 import { createAsyncQueue } from "./queue.ts";
-import { Tool, CompletionRequest, CompletionResponse, Message } from "./types.ts";
+import { ToolRegistry, CompletionRequest, CompletionResponse, Message } from "./types.ts";
 
 type AgentProps = {
     baseUrl: string;
     model: string;
-    tools?: Tool[];
+    tools: ToolRegistry;
 }
 
 const fetchCompletion = async (baseUrl: string, request: CompletionRequest): Promise<CompletionResponse> => {
@@ -20,6 +21,17 @@ export const createAgent = (props: AgentProps, callbackFn: (event: Message) => v
     const inputQueue = createAsyncQueue<Message>();
     const messages: Array<Message> = [];
 
+    const requestBase: Omit<CompletionRequest, 'messages'> = {
+        model: props.model ?? '',
+        tools: Object.entries(props.tools).map(([name, {schema}]) => ({
+            type: 'function',
+            function: {
+                name,
+                parameters: schema.toJSONSchema(),
+            }
+        })),
+    }
+
     void (async () => {
         while (true) {
             // console.log('top of loop')
@@ -30,15 +42,8 @@ export const createAgent = (props: AgentProps, callbackFn: (event: Message) => v
             }
 
             const request: CompletionRequest = {
-                model: props.model,
+                ...requestBase,
                 messages,
-                tools: props.tools?.map((t) => ({
-                    type: 'function',
-                    function: {
-                        name: t.name,
-                        parameters: t.parameters,
-                    }
-                })) ?? [],
                 reasoning_effort: 'none'
             }
             const completion = await fetchCompletion(props.baseUrl, request);
@@ -62,17 +67,16 @@ export const createAgent = (props: AgentProps, callbackFn: (event: Message) => v
                 for (const call of choice0.message.tool_calls) {
                     // console.log(call);
                     if (call.type !== 'function') continue;
-                    // TODO: error prone variable names - see global `tools`
-                    const tool = props.tools?.find((t) => t.name === call.function.name)
+                    const tool = props.tools[call.function.name];
                     if (!tool) {
                         inputQueue.push({role: 'tool', content: `tool not found: ${call.function.name}`})
                         continue;
                     }
 
                     try {
-                        const args = JSON.parse(call.function.arguments);
-                        const result = await tool.function(args);
-                        // console.log(call.function.name, result);
+                        const input = JSON.parse(call.function.arguments);
+                        const args = tool.schema.parse(input);
+                        const result = await tool.fn(args);
                         inputQueue.push({role: 'tool', content: result});
                     } catch (e) {
                         inputQueue.push({role: 'tool', content: `exception: ${e}`});

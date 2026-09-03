@@ -1,41 +1,24 @@
-import { Tool } from "./types.ts";
+import { Tool, tool } from "./types.ts";
 import { createAgent } from "./agent.ts";
+import z from "zod";
 
-const tools: Tool[] = [
-    {
-        name: 'time',
-        parameters: {},
-        function: () => Promise.resolve(new Date().toISOString()),
-    },
-    {
-        name: 'bash',
-        parameters: {
-            type: 'object',
-            properties: {
-                command: {type: 'string'},
-            },
-            required: ['command'],
-        },
-        function: async ({command}) => {
+const tools: Record<string, Tool> = {
+    time: tool(z.object(), () => Promise.resolve(new Date().toISOString())),
+    bash: tool(
+        z.object({command: z.string()}),
+        async ({command}) => {
             const result = await Deno.spawnAndWait("bash", ['-c', command]);
             return JSON.stringify({
                 command,
                 code: result.code,
                 stdout: new TextDecoder().decode(result.stdout),
                 stderr: new TextDecoder().decode(result.stderr),
-            }, null, 2);
-        },
-    },
-    {
-        name: 'fetch',
-        parameters: {
-            type: 'object',
-            properties: {
-                url: {type: 'string'},
-            },
-            required: ['url'],
-        },
-        function: async ({url}) => {
+            }, null, 2)
+        }
+    ),
+    fetch: tool(
+        z.object({url: z.string()}),
+        async ({url}) => {
             const result = await fetch(url);
 
             const contentType = result.headers.get('content-type');
@@ -45,8 +28,8 @@ const tools: Tool[] = [
 
             return await result.text();
         }
-    }
-]
+    ),
+}
 
 const agent = createAgent({
     baseUrl: 'http://10.11.116.184:8002',
@@ -72,6 +55,6 @@ setTimeout(() => {
     agent.send('explore the working directory with the bash tool');
 }, 6000)
 
-setInterval(() => {
-    agent.send('keep digging');
-}, 30000)
+// setInterval(() => {
+//     agent.send('keep digging');
+// }, 30000)

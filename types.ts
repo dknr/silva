@@ -1,3 +1,4 @@
+import * as z from 'zod';
 
 export type ToolCall = {
     type: string; // expect 'function'
@@ -13,18 +14,15 @@ export type Message = {
     reasoning_content?: string;
     tool_calls?: ToolCall[];
 }
-export type JSONSchema = {
-    type?: string;
-    description?: string;
-    properties?: Record<string, JSONSchema>;
-    required?: string[];
-    [key: string]: unknown;
+
+export type Tool<T extends z.ZodType = z.ZodType> = {
+    schema: T;
+    fn: (args: z.infer<T>) => Promise<string>;
 }
-export type Tool = {
-    name: string;
-    parameters: JSONSchema;
-    function: (args?: Map<string, unknown>) => Promise<string>;
-}
+export type ToolRegistry = Record<string, Tool>;
+
+export const tool = <T extends z.ZodType>(schema: T, fn: (args: z.infer<T>) => Promise<string>): Tool<T> => ({schema, fn});
+
 
 export type CompletionRequest = {
     model: string;
@@ -33,7 +31,7 @@ export type CompletionRequest = {
         type: 'function',
         function: {
             name: string;
-            parameters: JSONSchema;
+            parameters: unknown;
         }
     }>;
     reasoning_effort?: string;
