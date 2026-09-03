@@ -2,7 +2,7 @@ type ToolCall = {
     type: string; // expect 'function'
     function: {
         name: string;
-        arguments: unknown;
+        arguments: string;
     }
     id: string;
 }
@@ -22,7 +22,7 @@ type JSONSchema = {
 type Tool = {
     name: string;
     parameters: JSONSchema;
-    function: (arguments?: Map<string, unknown>) => Promise<string>;
+    function: (args?: Map<string, unknown>) => Promise<string>;
 }
 
 type CompletionRequest = {
@@ -55,7 +55,7 @@ type AgentProps = {
 
 const createAsyncQueue = <T>() => {
     let queue: T[] = [];
-    let waiter: null | ((value: T) => void) = null;
+    let waiter: null | ((value: T[]) => void) = null;
 
     return {
         push: (value: T) => {
@@ -71,9 +71,9 @@ const createAsyncQueue = <T>() => {
             if (queue.length) {
                 const result = queue;
                 queue = [];
-                return result
+                return Promise.resolve(result)
             } else {
-                return new Promise<T>((resolve) => {
+                return new Promise<T[]>((resolve) => {
                     waiter = resolve;
                 });
             }
@@ -82,11 +82,12 @@ const createAsyncQueue = <T>() => {
 }
 
 const createCompletionFetch = async (baseUrl: string, request: CompletionRequest): Promise<CompletionResponse> => {
-    return await fetch(new URL('v1/chat/completions', baseUrl), {
+    const response = await fetch(new URL('v1/chat/completions', baseUrl), {
         method: 'POST',
         body: JSON.stringify(request),
         headers: {'content-type': 'application/json'}
     });
+    return await response.json();
 }
 
 const createAgent = (props: AgentProps, callbackFn: (event: Message) => void) => {
@@ -105,19 +106,16 @@ const createAgent = (props: AgentProps, callbackFn: (event: Message) => void) =>
             const request: CompletionRequest = {
                 model: props.model,
                 messages,
-                tools: props.tools.map((t) => ({
+                tools: props.tools?.map((t) => ({
                     type: 'function',
                     function: {
                         name: t.name,
                         parameters: t.parameters,
                     }
-                })),
+                })) ?? [],
                 reasoning_effort: 'none'
             }
-            const response = await createCompletionFetch(props.baseUrl, request);
-
-            const completion: CompletionResponse = await response.json();
-            // console.log(completion);
+            const completion = await createCompletionFetch(props.baseUrl, request);
 
             if (!completion.choices) {
                 console.log('no choices!')
@@ -139,7 +137,7 @@ const createAgent = (props: AgentProps, callbackFn: (event: Message) => void) =>
                     // console.log(call);
                     if (call.type !== 'function') continue;
                     // TODO: error prone variable names - see global `tools`
-                    const tool = props.tools.find((t) => t.name === call.function.name)
+                    const tool = props.tools?.find((t) => t.name === call.function.name)
                     if (!tool) {
                         inputQueue.push({role: 'tool', content: `tool not found: ${call.function.name}`})
                         continue;
@@ -159,60 +157,63 @@ const createAgent = (props: AgentProps, callbackFn: (event: Message) => void) =>
     })();
 
     return {
-        send: (message: Message) => {
-            inputQueue.push(message);
+        send: (content: string) => {
+            inputQueue.push({role: 'user', content});
         }
     }
 }
 
+const tools: Tool[] = [
+    {
+        name: 'time',
+        parameters: {},
+        function: () => Promise.resolve(new Date().toISOString()),
+    },
+    {
+        name: 'bash',
+        parameters: {
+            type: 'object',
+            properties: {
+                command: {type: 'string'},
+            },
+            required: ['command'],
+        },
+        function: async ({command}) => {
+            const result = await Deno.spawnAndWait("bash", ['-c', command]);
+            return JSON.stringify({
+                command,
+                code: result.code,
+                stdout: new TextDecoder().decode(result.stdout),
+                stderr: new TextDecoder().decode(result.stderr),
+            }, null, 2);
+        },
+    },
+    {
+        name: 'fetch',
+        parameters: {
+            type: 'object',
+            properties: {
+                url: {type: 'string'},
+            },
+            required: ['url'],
+        },
+        function: async ({url}) => {
+            const result = await fetch(url);
+
+            const contentType = result.headers.get('content-type');
+            if (!contentType?.startsWith('text')) {
+                throw new Error(`content type not allowed: ${contentType}`);
+            }
+
+            return await result.text();
+        }
+    }
+]
+
 const agent = createAgent({
     baseUrl: 'http://10.11.116.184:8002',
-    tools: [
-        {
-            name: 'time',
-            parameters: {},
-            function: () => new Date().toISOString(),
-        },
-        {
-            name: 'bash',
-            parameters: {
-                type: 'object',
-                properties: {
-                    command: {type: 'string'},
-                },
-                required: ['command'],
-            },
-            function: async ({command}) => {
-                const result = await Deno.spawnAndWait("bash", ['-c', command]);
-                return JSON.stringify({
-                    command,
-                    code: result.code,
-                    stdout: new TextDecoder().decode(result.stdout),
-                    stderr: new TextDecoder().decode(result.stderr),
-                }, null, 2);
-            },
-        },
-        {
-            name: 'fetch',
-            parameters: {
-                type: 'object',
-                properties: {
-                    url: {type: 'string'},
-                },
-                required: ['url'],
-            },
-            function: async ({url}) => {
-                const result = await fetch(url);
-
-                const contentType = result.headers.get('content-type');
-                if (!contentType.startsWith('text')) {
-                    throw new Error(`content type not allowed: ${contentType}`);
-                }
-
-                return await result.text();
-            }
-        }
-    ],
+    model: '',
+    tools,
 }, (e) => {
     try {
         if (e.tool_calls?.length) {
@@ -227,12 +228,12 @@ const agent = createAgent({
     }
 });
 
-agent.send({role: 'user', content: 'hello!'})
-agent.send({role: 'user', content: 'what time is it?'})
+agent.send('hello!')
+agent.send('what time is it?')
 setTimeout(() => {
-    agent.send({role: 'user', content: 'explore the working directory with the bash tool'});
+    agent.send('explore the working directory with the bash tool');
 }, 6000)
 
 setInterval(() => {
-    agent.send({role: 'user', content: 'keep digging'})
+    agent.send('keep digging');
 }, 30000)
