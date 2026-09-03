@@ -166,7 +166,7 @@ const createAgent = (props: AgentProps, callbackFn: (event: Message) => void) =>
 }
 
 const agent = createAgent({
-    baseUrl: 'http://10.11.116.184:8001',
+    baseUrl: 'http://10.11.116.184:8002',
     tools: [
         {
             name: 'time',
@@ -182,7 +182,15 @@ const agent = createAgent({
                 },
                 required: ['command'],
             },
-            function: () => 'bash tool not implemented yet',
+            function: async ({command}) => {
+                const result = await Deno.spawnAndWait("bash", ['-c', command]);
+                return JSON.stringify({
+                    command,
+                    code: result.code,
+                    stdout: new TextDecoder().decode(result.stdout),
+                    stderr: new TextDecoder().decode(result.stderr),
+                }, null, 2);
+            },
         },
         {
             name: 'fetch',
@@ -195,6 +203,12 @@ const agent = createAgent({
             },
             function: async ({url}) => {
                 const result = await fetch(url);
+
+                const contentType = result.headers.get('content-type');
+                if (!contentType.startsWith('text')) {
+                    throw new Error(`content type not allowed: ${contentType}`);
+                }
+
                 return await result.text();
             }
         }
@@ -202,7 +216,7 @@ const agent = createAgent({
 }, (e) => {
     try {
         if (e.tool_calls?.length) {
-            console.log('🔨', e.tool_calls[0].function.name);
+            console.log('🔨', e.tool_calls[0].function.name, e.tool_calls[0].function.arguments);
         } else if (e.role === 'tool') {
             // no-op
         } else {
@@ -216,7 +230,7 @@ const agent = createAgent({
 agent.send({role: 'user', content: 'hello!'})
 agent.send({role: 'user', content: 'what time is it?'})
 setTimeout(() => {
-    agent.send({role: 'user', content: 'try the fetch tool with https://caos.one/posts'});
+    agent.send({role: 'user', content: 'explore the working directory with the bash tool'});
 }, 6000)
 
 setInterval(() => {
