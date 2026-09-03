@@ -13,11 +13,9 @@ type Message = {
     tool_calls?: ToolCall[];
 }
 type Tool = {
-    type: 'function';
-    function: {
-        name: string;
-        parameters: Map<string, unknown>;
-    }
+    name: string;
+    parameters: Map<string, unknown>;
+    function: (parameters?: Map<string, unknown>) => string;
 }
 
 type ToolImpl = (params: unknown) => string;
@@ -26,7 +24,13 @@ type Tools = Map<string, ToolImpl>;
 type CompletionRequest = {
     model: string;
     messages: Array<Message>;
-    tools: Array<Tool>;
+    tools: Array<{
+        type: 'function',
+        function: {
+            name: string;
+            parameters: Map<string, unknown>;
+        }
+    }>;
     reasoning_effort?: string;
 }
 
@@ -73,9 +77,9 @@ const createAsyncQueue = <T>() => {
 
 // TODO: not as a global
 // IDEA: hot-reload tools - send new tool fns in on the fly
-const tools: Map<string, ToolImpl> = {
-    time: () => new Date().toISOString(),
-}
+// const tools: Map<string, ToolImpl> = {
+//     time: () => new Date().toISOString(),
+// }
 
 const createCompletionFetch = async (baseUrl: string, request: CompletionRequest): Promise<CompletionResponse> => {
     return await fetch(new URL('v1/chat/completions', baseUrl), {
@@ -99,7 +103,13 @@ const createAgent = (props: AgentProps, callbackFn: (event: Message) => void) =>
             const request: CompletionRequest = {
                 model: props.model,
                 messages,
-                tools: props.tools,
+                tools: props.tools.map((t) => ({
+                    type: 'function',
+                    function: {
+                        name: t.name,
+                        parameters: t.parameters,
+                    }
+                })),
             }
             const response = await createCompletionFetch(props.baseUrl, request);
 
@@ -119,14 +129,13 @@ const createAgent = (props: AgentProps, callbackFn: (event: Message) => void) =>
                     // console.log(call);
                     if (call.type !== 'function') continue;
                     // TODO: error prone variable names - see global `tools`
-                    const tool = tools[call.function.name];
+                    const tool = props.tools.find((t) => t.name === call.function.name)
                     if (!tool) {
-                        console.log(`tool not found: ${call.function.name}`);
-                        // TODO: tell the agent the tool was not found
+                        inputQueue.push({role: 'tool', content: `tool not found: ${call.function.name}`})
                         continue;
                     }
-                    const result = tool();
-                    console.log(call.function.name, result);
+                    const result = tool.function();
+                    // console.log(call.function.name, result);
                     inputQueue.push({role: 'tool', content: result});
                 }
             }
@@ -143,10 +152,11 @@ const createAgent = (props: AgentProps, callbackFn: (event: Message) => void) =>
 const agent = createAgent({
     baseUrl: 'http://10.11.116.184:8001',
     tools: [
-        {type: 'function', function: {
+        {
             name: 'time',
-            parameters: {}
-        }}
+            parameters: {},
+            function: () => new Date().toISOString(),
+        }
     ],
 }, (e) => {
     try {
