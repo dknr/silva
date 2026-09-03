@@ -12,14 +12,18 @@ type Message = {
     reasoning_content?: string;
     tool_calls?: ToolCall[];
 }
+type JSONSchema = {
+    type?: string;
+    description?: string;
+    properties?: Record<string, JSONSchema>;
+    required?: string[];
+    [key: string]: unknown;
+}
 type Tool = {
     name: string;
-    parameters: Map<string, unknown>;
+    parameters: JSONSchema;
     function: (parameters?: Map<string, unknown>) => string;
 }
-
-type ToolImpl = (params: unknown) => string;
-type Tools = Map<string, ToolImpl>;
 
 type CompletionRequest = {
     model: string;
@@ -28,7 +32,7 @@ type CompletionRequest = {
         type: 'function',
         function: {
             name: string;
-            parameters: Map<string, unknown>;
+            parameters: JSONSchema;
         }
     }>;
     reasoning_effort?: string;
@@ -74,12 +78,6 @@ const createAsyncQueue = <T>() => {
         }
     }
 }
-
-// TODO: not as a global
-// IDEA: hot-reload tools - send new tool fns in on the fly
-// const tools: Map<string, ToolImpl> = {
-//     time: () => new Date().toISOString(),
-// }
 
 const createCompletionFetch = async (baseUrl: string, request: CompletionRequest): Promise<CompletionResponse> => {
     return await fetch(new URL('v1/chat/completions', baseUrl), {
@@ -156,6 +154,17 @@ const agent = createAgent({
             name: 'time',
             parameters: {},
             function: () => new Date().toISOString(),
+        },
+        {
+            name: 'bash',
+            parameters: {
+                type: 'object',
+                properties: {
+                    command: {type: 'string'},
+                },
+                required: ['command'],
+            },
+            function: () => 'bash tool not implemented yet',
         }
     ],
 }, (e) => {
@@ -169,7 +178,7 @@ const agent = createAgent({
 agent.send({role: 'user', content: 'hello!'})
 agent.send({role: 'user', content: 'what time is it?'})
 setTimeout(() => {
-    agent.send({role: 'user', content: 'foo'});
+    agent.send({role: 'user', content: 'what tools are available? try them out.'});
 }, 6000)
 
 // const modelsResponse = await fetch('http://10.11.116.184:8001/v1/models');
