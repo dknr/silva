@@ -22,7 +22,7 @@ type JSONSchema = {
 type Tool = {
     name: string;
     parameters: JSONSchema;
-    function: (parameters?: Map<string, unknown>) => string;
+    function: (arguments?: Map<string, unknown>) => Promise<string>;
 }
 
 type CompletionRequest = {
@@ -54,7 +54,7 @@ type AgentProps = {
 }
 
 const createAsyncQueue = <T>() => {
-    const queue: T[] = [];
+    let queue: T[] = [];
     let waiter: null | ((value: T) => void) = null;
 
     return {
@@ -62,14 +62,16 @@ const createAsyncQueue = <T>() => {
             if (waiter) {
                 const wait = waiter;
                 waiter = null;
-                wait(value);
+                wait([value]);
             } else {
                 queue.push(value);
             }
         },
-        pop: (): Promise<T> => {
+        flush: (): Promise<T[]> => {
             if (queue.length) {
-                return queue.shift();
+                const result = queue;
+                queue = [];
+                return result
             } else {
                 return new Promise<T>((resolve) => {
                     waiter = resolve;
@@ -94,9 +96,11 @@ const createAgent = (props: AgentProps, callbackFn: (event: Message) => void) =>
     void (async () => {
         while (true) {
             // console.log('top of loop')
-            const message = await inputQueue.pop();
-            messages.push(message);
-            callbackFn(message);
+            const newMessages = await inputQueue.flush()
+            for (const message of newMessages) {
+                callbackFn(message);
+                messages.push(message);
+            }
 
             const request: CompletionRequest = {
                 model: props.model,
@@ -108,6 +112,7 @@ const createAgent = (props: AgentProps, callbackFn: (event: Message) => void) =>
                         parameters: t.parameters,
                     }
                 })),
+                reasoning_effort: 'none'
             }
             const response = await createCompletionFetch(props.baseUrl, request);
 
@@ -121,6 +126,7 @@ const createAgent = (props: AgentProps, callbackFn: (event: Message) => void) =>
             const choice0 = completion.choices[0];
             messages.push(choice0.message);
             callbackFn(choice0.message)
+            console.log(choice0)
 
             if (choice0.message.tool_calls?.length) {
                 for (const call of choice0.message.tool_calls) {
@@ -132,9 +138,15 @@ const createAgent = (props: AgentProps, callbackFn: (event: Message) => void) =>
                         inputQueue.push({role: 'tool', content: `tool not found: ${call.function.name}`})
                         continue;
                     }
-                    const result = tool.function();
-                    // console.log(call.function.name, result);
-                    inputQueue.push({role: 'tool', content: result});
+
+                    try {
+                        const args = JSON.parse(call.function.arguments);
+                        const result = await tool.function(args);
+                        // console.log(call.function.name, result);
+                        inputQueue.push({role: 'tool', content: result});
+                    } catch (e) {
+                        inputQueue.push({role: 'tool', content: `exception: ${e}`});
+                    }
                 }
             }
         }
@@ -165,6 +177,20 @@ const agent = createAgent({
                 required: ['command'],
             },
             function: () => 'bash tool not implemented yet',
+        },
+        {
+            name: 'fetch',
+            parameters: {
+                type: 'object',
+                properties: {
+                    url: {type: 'string'},
+                },
+                required: ['url'],
+            },
+            function: async ({url}) => {
+                const result = await fetch(url);
+                return await result.text();
+            }
         }
     ],
 }, (e) => {
@@ -178,7 +204,7 @@ const agent = createAgent({
 agent.send({role: 'user', content: 'hello!'})
 agent.send({role: 'user', content: 'what time is it?'})
 setTimeout(() => {
-    agent.send({role: 'user', content: 'what tools are available? try them out.'});
+    agent.send({role: 'user', content: 'try the fetch tool with https://caos.one/posts'});
 }, 6000)
 
 // const modelsResponse = await fetch('http://10.11.116.184:8001/v1/models');
