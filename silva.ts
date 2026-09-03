@@ -1,8 +1,8 @@
-import { Tool, tool } from "./types.ts";
-import { createAgent } from "./agent.ts";
 import z from "zod";
 
-const tools: Record<string, Tool> = {
+import { createAgent, ToolRegistry, tool } from "./agent/mod.ts";
+
+const tools: ToolRegistry = {
     time: tool(z.object(), () => Promise.resolve(new Date().toISOString())),
     bash: tool(
         z.object({command: z.string()}),
@@ -48,13 +48,3 @@ const agent = createAgent({
         console.log(e);
     }
 });
-
-agent.send('hello!')
-agent.send('what time is it?')
-setTimeout(() => {
-    agent.send('explore the working directory with the bash tool');
-}, 6000)
-
-// setInterval(() => {
-//     agent.send('keep digging');
-// }, 30000)

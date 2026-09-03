@@ -1,4 +1,3 @@
-import z from "zod";
 import { createAsyncQueue } from "./queue.ts";
 import { ToolRegistry, CompletionRequest, CompletionResponse, Message } from "./types.ts";
 
