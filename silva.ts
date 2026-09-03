@@ -71,10 +71,6 @@ const createAsyncQueue = <T>() => {
     }
 }
 
-type AgentEvent = {
-    message: Message;
-}
-
 // TODO: not as a global
 // IDEA: hot-reload tools - send new tool fns in on the fly
 const tools: Map<string, ToolImpl> = {
@@ -89,17 +85,16 @@ const createCompletionFetch = async (baseUrl: string, request: CompletionRequest
     });
 }
 
-const createAgent = (props: AgentProps, callbackFn: (event: AgentEvent) => void) => {
+const createAgent = (props: AgentProps, callbackFn: (event: Message) => void) => {
     const inputQueue = createAsyncQueue<Message>();
     const messages: Array<Message> = [];
 
     void (async () => {
         while (true) {
-            console.log('top of loop')
-            const content = await inputQueue.pop();
-            const userMessage = {role: 'user', content};
-            messages.push(userMessage);
-            callbackFn(userMessage);
+            // console.log('top of loop')
+            const message = await inputQueue.pop();
+            messages.push(message);
+            callbackFn(message);
 
             const request: CompletionRequest = {
                 model: props.model,
@@ -109,7 +104,7 @@ const createAgent = (props: AgentProps, callbackFn: (event: AgentEvent) => void)
             const response = await createCompletionFetch(props.baseUrl, request);
 
             const completion: CompletionResponse = await response.json();
-            console.log(completion);
+            // console.log(completion);
 
             if (completion.choices.length > 1) {
                 console.log('more than one choice') // TODO: logging and handle multiple choices
@@ -121,7 +116,7 @@ const createAgent = (props: AgentProps, callbackFn: (event: AgentEvent) => void)
 
             if (choice0.message.tool_calls?.length) {
                 for (const call of choice0.message.tool_calls) {
-                    console.log(call);
+                    // console.log(call);
                     if (call.type !== 'function') continue;
                     // TODO: error prone variable names - see global `tools`
                     const tool = tools[call.function.name];
@@ -132,14 +127,14 @@ const createAgent = (props: AgentProps, callbackFn: (event: AgentEvent) => void)
                     }
                     const result = tool();
                     console.log(call.function.name, result);
-                    inputQueue.push(result);
+                    inputQueue.push({role: 'tool', content: result});
                 }
             }
         }
     })();
 
     return {
-        send: (message: string) => {
+        send: (message: Message) => {
             inputQueue.push(message);
         }
     }
@@ -153,10 +148,19 @@ const agent = createAgent({
             parameters: {}
         }}
     ],
-}, console.log);
+}, (e) => {
+    try {
+        console.log(e.role, e.content)
+    } catch {
+        console.log(e);
+    }
+});
 
-agent.send('hello!')
-agent.send('what time is it?')
+agent.send({role: 'user', content: 'hello!'})
+agent.send({role: 'user', content: 'what time is it?'})
+setTimeout(() => {
+    agent.send({role: 'user', content: 'foo'});
+}, 6000)
 
 // const modelsResponse = await fetch('http://10.11.116.184:8001/v1/models');
 // const models = await modelsResponse.json();
