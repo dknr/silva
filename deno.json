@@ -1,5 +1,6 @@
 {
   "imports": {
+    "gramio": "npm:gramio@^0.14.0",
     "zod": "npm:zod@^4.5.4"
   }
 }
