@@ -1,18 +1,19 @@
 import { Bot } from "gramio";
 import z from "zod";
 
-import { createAgent, tool, ToolRegistry } from "./agent/mod.ts";
+import { createAgent, Tool, tool, ToolRegistry } from "./agent/mod.ts";
 import { createAsyncQueue } from "./agent/queue.ts";
 
 const time = tool(z.object(), () => {
-    const now = new Date()
-    now.setFullYear(2051);
-    now.setMonth(2)
-    return Promise.resolve(now.toISOString());
+  const now = new Date();
+  //   now.setFullYear(2051);
+  //   now.setMonth(2);
+  return Promise.resolve(now.toISOString());
 });
 const curl: Tool = tool(
   z.object({ url: z.string() }),
   async ({ url }) => {
+    console.log("curl", url);
     const result = await fetch(url);
 
     const contentType = result.headers.get("content-type");
@@ -56,12 +57,13 @@ const tools: ToolRegistry = {
             time,
             curl,
           },
+          systemPrompt: "",
         }, (_, c) => {
           if (c?.finish_reason === "stop") {
             resolve(c.message.content);
           }
         });
-        subagent.send(prompt);
+        subagent.send({ role: "user", content: prompt });
       }),
   ),
 };
@@ -73,15 +75,14 @@ const bot = new Bot(Deno.env.get("TG_TOKEN") ?? "");
 bot.on("message", (context) => {
   if (context.from.id !== allowedId) return;
   if (!context.hasText()) return;
-//   console.log(context.text);
+  //   console.log(context.text);
 
-  if (context.text === '/reset')
-  {
-    agent.reset()
+  if (context.text === "/reset") {
+    agent.reset();
     return;
   }
 
-  agent.send(context.text);
+  agent.send({ role: "user", content: context.text });
 });
 
 bot.start();
@@ -91,6 +92,7 @@ const agent = createAgent({
   baseUrl: "http://10.11.116.184:8002",
   model: "",
   tools,
+  systemPrompt: "Check the time. There's lots to do, but don't rush. Be precise. You are fallible, so check sources rather than assume. You're an autonomous agent. You have agency. Use it!",
 }, (e) => {
   try {
     if (e.role === "assistant" && e.content) {

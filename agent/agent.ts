@@ -11,6 +11,7 @@ type AgentProps = {
   baseUrl: string;
   model: string;
   tools: ToolRegistry;
+  systemPrompt: string;
 };
 
 const fetchCompletion = async (
@@ -29,7 +30,9 @@ export const createAgent = (
   props: AgentProps,
   callbackFn: (event: Message, choice?: CompletionChoice) => void,
 ) => {
-  const inputQueue = createAsyncQueue<Message>();
+  const inputQueue = createAsyncQueue<Message>(() => [
+    { role: "system", content: props.systemPrompt },
+  ]);
   let messages: Array<Message> = [];
 
   const requestBase: Omit<CompletionRequest, "messages"> = {
@@ -101,11 +104,12 @@ export const createAgent = (
   })();
 
   return {
-    send: (content: string) => {
-      inputQueue.push({ role: "user", content });
+    send: (content: Message) => {
+      inputQueue.push(content);
     },
     reset: () => {
-      messages = []
-    }
+      messages = [];
+      inputQueue.reset();
+    },
   };
 };
