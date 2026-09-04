@@ -2,7 +2,8 @@ import { Bot } from "gramio";
 import z from "zod";
 
 import { createAgent, Tool, tool, ToolRegistry } from "./agent/mod.ts";
-import { createAsyncQueue } from "./agent/queue.ts";
+import { AgentContext } from "./agent/agent.ts";
+import { Message } from "./agent/types.ts";
 
 const time = tool(z.object(), () => {
   const now = new Date();
@@ -44,6 +45,15 @@ const bash = tool(
   },
 );
 
+const simpleContext = (init?: () => Message[]): AgentContext => {
+    let context: Message[] = init?.() ?? [];
+    return {
+        push: (message) => context.push(message),
+        read: () => context,
+        reset: () => {context = init?.() ?? []}
+    }
+}
+
 const tools: ToolRegistry = {
   time,
   agent: tool(
@@ -57,7 +67,7 @@ const tools: ToolRegistry = {
             time,
             curl,
           },
-          systemPrompt: "",
+          context: simpleContext(),
         }, (_, c) => {
           if (c?.finish_reason === "stop") {
             resolve(c.message.content);
@@ -92,7 +102,7 @@ const agent = createAgent({
   baseUrl: "http://10.11.116.184:8002",
   model: "",
   tools,
-  systemPrompt: "Check the time. There's lots to do, but don't rush. Be precise. You are fallible, so check sources rather than assume. You're an autonomous agent. You have agency. Use it!",
+  context: simpleContext(() => [{role: 'system', content: "Check the time. There's lots to do, but don't rush. Be precise. You are fallible, so check sources rather than assume. You're an autonomous agent. You have agency. Use it!"}]),
 }, (e) => {
   try {
     if (e.role === "assistant" && e.content) {

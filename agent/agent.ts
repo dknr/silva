@@ -7,11 +7,17 @@ import {
   ToolRegistry,
 } from "./types.ts";
 
+export type AgentContext = {
+  push: (message: Message) => void;
+  read: () => Message[];
+  reset: () => void;
+}
+
 type AgentProps = {
   baseUrl: string;
   model: string;
   tools: ToolRegistry;
-  systemPrompt: string;
+  context: AgentContext;
 };
 
 const fetchCompletion = async (
@@ -30,10 +36,7 @@ export const createAgent = (
   props: AgentProps,
   callbackFn: (event: Message, choice?: CompletionChoice) => void,
 ) => {
-  const inputQueue = createAsyncQueue<Message>(() => [
-    { role: "system", content: props.systemPrompt },
-  ]);
-  let messages: Array<Message> = [];
+  const inputQueue = createAsyncQueue<Message>();
 
   const requestBase: Omit<CompletionRequest, "messages"> = {
     model: props.model ?? "",
@@ -52,12 +55,12 @@ export const createAgent = (
       const newMessages = await inputQueue.flush();
       for (const message of newMessages) {
         callbackFn(message);
-        messages.push(message);
+        props.context.push(message);
       }
 
       const request: CompletionRequest = {
         ...requestBase,
-        messages,
+        messages: props.context.read(),
         reasoning_effort: "none",
       };
       const completion = await fetchCompletion(props.baseUrl, request);
@@ -73,7 +76,7 @@ export const createAgent = (
       }
 
       const choice0 = completion.choices[0];
-      messages.push(choice0.message);
+      props.context.push(choice0.message);
       callbackFn(choice0.message, choice0);
       // console.log(choice0)
 
@@ -108,7 +111,7 @@ export const createAgent = (
       inputQueue.push(content);
     },
     reset: () => {
-      messages = [];
+      props.context.reset()
       inputQueue.reset();
     },
   };

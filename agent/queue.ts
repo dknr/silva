@@ -1,5 +1,5 @@
-export const createAsyncQueue = <T>(init: () => T[]) => {
-  let queue: T[] = init();
+export const createAsyncQueue = <T>() => {
+  let queue: T[] = [];
   let waiter: null | ((value: T[]) => void) = null;
 
   return {
@@ -24,7 +24,7 @@ export const createAsyncQueue = <T>(init: () => T[]) => {
       }
     },
     reset: () => {
-      queue = init();
+      queue = [];
       waiter = null;
     },
   };
