@@ -22,6 +22,6 @@ export const createAsyncQueue = <T>() => {
           waiter = resolve;
         });
       }
-    }
+    },
   };
 };

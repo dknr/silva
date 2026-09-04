@@ -1,93 +1,111 @@
 import { createAsyncQueue } from "./queue.ts";
-import { ToolRegistry, CompletionRequest, CompletionResponse, Message } from "./types.ts";
+import {
+  CompletionChoice,
+  CompletionRequest,
+  CompletionResponse,
+  Message,
+  ToolRegistry,
+} from "./types.ts";
 
 type AgentProps = {
-    baseUrl: string;
-    model: string;
-    tools: ToolRegistry;
-}
+  baseUrl: string;
+  model: string;
+  tools: ToolRegistry;
+};
 
-const fetchCompletion = async (baseUrl: string, request: CompletionRequest): Promise<CompletionResponse> => {
-    const response = await fetch(new URL('v1/chat/completions', baseUrl), {
-        method: 'POST',
-        body: JSON.stringify(request),
-        headers: {'content-type': 'application/json'}
-    });
-    return await response.json();
-}
+const fetchCompletion = async (
+  baseUrl: string,
+  request: CompletionRequest,
+): Promise<CompletionResponse> => {
+  const response = await fetch(new URL("v1/chat/completions", baseUrl), {
+    method: "POST",
+    body: JSON.stringify(request),
+    headers: { "content-type": "application/json" },
+  });
+  return await response.json();
+};
 
-export const createAgent = (props: AgentProps, callbackFn: (event: Message) => void) => {
-    const inputQueue = createAsyncQueue<Message>();
-    const messages: Array<Message> = [];
+export const createAgent = (
+  props: AgentProps,
+  callbackFn: (event: Message, choice?: CompletionChoice) => void,
+) => {
+  const inputQueue = createAsyncQueue<Message>();
+  let messages: Array<Message> = [];
 
-    const requestBase: Omit<CompletionRequest, 'messages'> = {
-        model: props.model ?? '',
-        tools: Object.entries(props.tools).map(([name, {schema}]) => ({
-            type: 'function',
-            function: {
-                name,
-                parameters: schema.toJSONSchema(),
-            }
-        })),
-    }
+  const requestBase: Omit<CompletionRequest, "messages"> = {
+    model: props.model ?? "",
+    tools: Object.entries(props.tools).map(([name, { schema }]) => ({
+      type: "function",
+      function: {
+        name,
+        parameters: schema.toJSONSchema(),
+      },
+    })),
+  };
 
-    void (async () => {
-        while (true) {
-            // console.log('top of loop')
-            const newMessages = await inputQueue.flush()
-            for (const message of newMessages) {
-                callbackFn(message);
-                messages.push(message);
-            }
+  void (async () => {
+    while (true) {
+      // console.log('top of loop')
+      const newMessages = await inputQueue.flush();
+      for (const message of newMessages) {
+        callbackFn(message);
+        messages.push(message);
+      }
 
-            const request: CompletionRequest = {
-                ...requestBase,
-                messages,
-                reasoning_effort: 'none'
-            }
-            const completion = await fetchCompletion(props.baseUrl, request);
+      const request: CompletionRequest = {
+        ...requestBase,
+        messages,
+        reasoning_effort: "none",
+      };
+      const completion = await fetchCompletion(props.baseUrl, request);
 
-            if (!completion.choices) {
-                console.log('no choices!')
-                console.log(completion);
-            }
+      if (!completion.choices) {
+        console.log("no choices!");
+        console.log(completion);
+      }
 
-            if (completion.choices.length > 1) {
-                console.log('more than one choice') // TODO: logging and handle multiple choices
-                console.log(completion);
-            }
+      if (completion.choices.length > 1) {
+        console.log("more than one choice"); // TODO: logging and handle multiple choices
+        console.log(completion);
+      }
 
-            const choice0 = completion.choices[0];
-            messages.push(choice0.message);
-            callbackFn(choice0.message)
-            // console.log(choice0)
+      const choice0 = completion.choices[0];
+      messages.push(choice0.message);
+      callbackFn(choice0.message, choice0);
+      // console.log(choice0)
 
-            if (choice0.message.tool_calls?.length) {
-                for (const call of choice0.message.tool_calls) {
-                    // console.log(call);
-                    if (call.type !== 'function') continue;
-                    const tool = props.tools[call.function.name];
-                    if (!tool) {
-                        inputQueue.push({role: 'tool', content: `tool not found: ${call.function.name}`})
-                        continue;
-                    }
+      if (choice0.message.tool_calls?.length) {
+        for (const call of choice0.message.tool_calls) {
+          // console.log(call);
+          if (call.type !== "function") continue;
+          const tool = props.tools[call.function.name];
+          if (!tool) {
+            inputQueue.push({
+              role: "tool",
+              content: `tool not found: ${call.function.name}`,
+            });
+            continue;
+          }
 
-                    try {
-                        const input = JSON.parse(call.function.arguments);
-                        const args = tool.schema.parse(input);
-                        const result = await tool.fn(args);
-                        inputQueue.push({role: 'tool', content: result});
-                    } catch (e) {
-                        inputQueue.push({role: 'tool', content: `exception: ${e}`});
-                    }
-                }
-            }
+          try {
+            const input = JSON.parse(call.function.arguments);
+            const args = tool.schema.parse(input);
+            const result = await tool.fn(args);
+            inputQueue.push({ role: "tool", content: result });
+          } catch (e) {
+            inputQueue.push({ role: "tool", content: `exception: ${e}` });
+          }
         }
-    })();
-
-    return {
-        send: (content: string) => {
-            inputQueue.push({role: 'user', content});
-        }
+      }
     }
-}
+  })();
+
+  return {
+    send: (content: string) => {
+      inputQueue.push({ role: "user", content });
+    },
+    reset: () => {
+      messages = []
+    }
+  };
+};
