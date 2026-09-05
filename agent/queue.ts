@@ -25,7 +25,11 @@ export const createAsyncQueue = <T>() => {
     },
     reset: () => {
       queue = [];
-      waiter = null;
+      if (waiter) {
+        const wait = waiter;
+        waiter = null;
+        wait([]);
+      }
     },
   };
 };

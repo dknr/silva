@@ -53,6 +53,7 @@ export const createAgent = (
     while (true) {
       // console.log('top of loop')
       const newMessages = await inputQueue.flush();
+      if (!newMessages.length) continue;
       for (const message of newMessages) {
         callbackFn(message);
         props.context.push(message);
