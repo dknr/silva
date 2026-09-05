@@ -13,6 +13,7 @@ export type Message = {
   content: string;
   reasoning_content?: string;
   tool_calls?: ToolCall[];
+  tool_call_id?: string;
 };
 
 export type Tool<T extends z.ZodType = z.ZodType> = {
