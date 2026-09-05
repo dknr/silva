@@ -90,6 +90,7 @@ export const createAgent = (
             inputQueue.push({
               role: "tool",
               content: `tool not found: ${call.function.name}`,
+              tool_call_id: call.id,
             });
             continue;
           }
@@ -98,9 +99,9 @@ export const createAgent = (
             const input = JSON.parse(call.function.arguments);
             const args = tool.schema.parse(input);
             const result = await tool.fn(args);
-            inputQueue.push({ role: "tool", content: result });
+            inputQueue.push({ role: "tool", content: result, tool_call_id: call.id });
           } catch (e) {
-            inputQueue.push({ role: "tool", content: `exception: ${e}` });
+            inputQueue.push({ role: "tool", content: `exception: ${e}`, tool_call_id: call.id });
           }
         }
       }
