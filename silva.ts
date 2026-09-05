@@ -92,6 +92,14 @@ bot.on("message", (context) => {
     return;
   }
 
+  void bot.api
+    .setMessageReaction({
+      chat_id: allowedId,
+      message_id: context.payload.message_id,
+      reaction: [{ type: "emoji", emoji: "👀" }],
+    })
+    .catch(() => {});
+
   agent.send({ role: "user", content: context.text });
 });
 
